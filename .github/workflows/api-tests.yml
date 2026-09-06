@@ -38,8 +38,9 @@ jobs:
           pip install -r requirements.txt
           pip install -r ../blog-system-under-test/requirements.txt
           # 被测系统钉了 fastapi==0.104.1 但未钉 pydantic，
-          # pydantic>=2.13 会让其在 import 阶段直接崩溃（FieldInfo.in_）
-          pip install "pydantic>=2.5,<2.13"
+          # pydantic>=2.12 会让其在 import 阶段直接崩溃（FieldInfo.in_），
+          # CI 实测 2.12.5 崩、2.11.7 正常
+          pip install "pydantic>=2.5,<2.12"
 
       - name: 生成被测系统配置（随机 SECRET_KEY）
         working-directory: ../blog-system-under-test

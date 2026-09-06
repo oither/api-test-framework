@@ -147,7 +147,7 @@ allure serve reports/allure-results
 
 GitHub Actions 工作流（[.github/workflows/api-tests.yml](.github/workflows/api-tests.yml)）在每次 push 到 main 或手动触发时自动执行：
 
-1. 克隆被测博客系统，安装两侧依赖（显式约束 `pydantic<2.13`，规避其与被测系统 `fastapi==0.104.1` 的不兼容），生成随机 `SECRET_KEY` 配置
+1. 克隆被测博客系统，安装两侧依赖（显式约束 `pydantic<2.12`，规避其与被测系统 `fastapi==0.104.1` 的不兼容），生成随机 `SECRET_KEY` 配置
 2. 后台启动 uvicorn，轮询健康检查接口等待服务就绪
 3. `pytest --env=dev` 跑全量 64 条用例
 4. 无论成败，生成 Allure HTML 报告；用例失败时额外上传被测服务日志便于排查
@@ -212,9 +212,9 @@ GitHub Actions 工作流（[.github/workflows/api-tests.yml](.github/workflows/a
 
 **4. 依赖漂移：pydantic 升级后被测服务直接起不来**
 
-- **现象**：本地新装环境后启动被测系统，uvicorn 在 import 阶段就崩溃：`AttributeError: 'FieldInfo' object has no attribute 'in_'`。
-- **定位**：被测系统钉死了 `fastapi==0.104.1` 却没钉 pydantic；pydantic 2.13 改了 `FieldInfo` 内部结构，与旧版 FastAPI 的参数解析不兼容。降级到 pydantic 2.11 后恢复正常。
-- **解决**：测试框架本地环境降级 pydantic；CI 工作流安装依赖后显式追加 `pip install "pydantic>=2.5,<2.13"` 兜底。这也是一次间接验证——**被测系统自己的 CI 同样会踩这个坑**，依赖只钉直接依赖、不钉传递依赖，迟早会在某个"与我无关"的升级日炸掉。
+- **现象**：CI（以及本地新装环境）启动被测系统时，uvicorn 在 import 阶段就崩溃：`AttributeError: 'FieldInfo' object has no attribute 'in_'`。
+- **定位**：被测系统钉死了 `fastapi==0.104.1` 却没钉 pydantic。实测 pydantic 2.12.5 崩、2.11.7 正常——pydantic 2.12 起改变了 `FieldInfo` 的内部结构，与旧版 FastAPI 的参数解析不兼容。
+- **解决**：CI 安装依赖后显式追加 `pip install "pydantic>=2.5,<2.12"` 兜底。教训有二：其一，**约束边界要靠实验确定**——我最初按报错版本想当然写成 `<2.13`，CI 用 2.12.5 依然崩溃，用二分/实测才找到真正的安全边界；其二，**requirements 只钉直接依赖、不钉传递依赖，等于把传递依赖的升级权交给了 PyPI**，任何一行与自己无关的版本变更都可能弄挂自己的环境。
 
 ## 设计取舍
 
