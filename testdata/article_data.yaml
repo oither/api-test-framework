@@ -1,0 +1,146 @@
+# ===== 创建文章 =====
+- title: "创建文章成功-标准数据"
+  action: create
+  article_title: "自动化测试文章_${uuid}"
+  content: "这是通过API自动化测试创建的文章内容"
+  expected_status: 201
+  db_check: true
+
+- title: "创建文章成功-空字符串标题"
+  action: create
+  article_title: ""
+  content: "空字符串标题边界测试"
+  expected_status: 201
+  db_check: true
+
+- title: "创建文章成功-超长标题"
+  action: create
+  article_title: "长标题边界_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  content: "超长标题边界测试"
+  expected_status: 201
+
+- title: "创建文章失败-缺少title"
+  action: create
+  content: "只有内容没有标题"
+  expected_status: 422
+
+- title: "创建文章失败-缺少content"
+  action: create
+  article_title: "只有标题没有内容_${uuid}"
+  expected_status: 422
+
+- title: "创建文章失败-未登录"
+  action: create_no_auth
+  article_title: "未登录发文"
+  content: "应该失败"
+  expected_status: 401
+
+# ===== 文章列表 =====
+- title: "文章列表-默认分页"
+  action: list
+  expected_status: 200
+  check_pagination: true
+
+- title: "文章列表-自定义分页skip=0&limit=5"
+  action: list
+  skip: 0
+  limit: 5
+  expected_status: 200
+
+- title: "文章列表-limit下界0应返回422"
+  action: list
+  skip: 0
+  limit: 0
+  expected_status: 422
+
+- title: "文章列表-limit上界101应返回422"
+  action: list
+  skip: 0
+  limit: 101
+  expected_status: 422
+
+- title: "文章列表-limit最小值1"
+  action: list
+  skip: 0
+  limit: 1
+  expected_status: 200
+  check_pagination: true
+  max_items: 1
+
+- title: "文章列表-skip为负数返回422"
+  action: list
+  skip: -1
+  limit: 10
+  expected_status: 422
+
+- title: "文章列表-搜索匹配标题"
+  action: list_search
+  search_keyword: "测试文章"
+  expected_status: 200
+  expect_non_empty: true
+
+- title: "文章列表-搜索不匹配返回空"
+  action: list_search
+  search_keyword: "完全不存在的关键词xyz999"
+  expected_status: 200
+  expect_empty: true
+
+# ===== 文章详情 =====
+- title: "文章详情-存在的文章"
+  action: detail_exist
+  expected_status: 200
+
+- title: "文章详情-不存在的文章ID=999999"
+  action: detail
+  article_id: 999999
+  expected_status: 404
+
+# ===== 更新文章 =====
+- title: "更新文章-作者本人-修改标题和内容"
+  action: update_full
+  new_title: "更新后的标题_${uuid}"
+  new_content: "更新后的内容"
+  expected_status: 200
+  db_check: true
+
+- title: "更新文章-作者本人-仅修改标题(exclude_unset)"
+  action: update_partial
+  new_title: "仅改标题_${uuid}"
+  expected_status: 200
+  check_content_unchanged: true
+
+- title: "更新文章-非作者返回403"
+  action: update_by_other
+  new_title: "非法修改"
+  expected_status: 403
+
+- title: "更新文章-文章不存在返回404"
+  action: update
+  article_id: 999999
+  new_title: "不存在的文章"
+  expected_status: 404
+
+- title: "更新文章-未登录返回401"
+  action: update_no_auth
+  article_id: 999999
+  expected_status: 401
+
+# ===== 删除文章 =====
+- title: "删除文章-作者本人返回204"
+  action: delete_by_author
+  expected_status: 204
+  db_check_deleted: true
+
+- title: "删除文章-非作者返回403"
+  action: delete_by_other
+  expected_status: 403
+
+- title: "删除文章-不存在返回404"
+  action: delete
+  article_id: 999999
+  expected_status: 404
+
+- title: "删除文章-未登录返回401"
+  action: delete_no_auth
+  article_id: 999999
+  expected_status: 401

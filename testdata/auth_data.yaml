@@ -1,0 +1,85 @@
+# ===== 注册 =====
+- title: "注册成功-标准数据"
+  action: register
+  username: "user_${uuid}"
+  email: "user_${uuid}@example.com"
+  password: "Test@123456"
+  expected_status: 201
+  db_check: true
+
+- title: "注册成功-用户名含下划线和数字"
+  action: register
+  username: "test_user_123_${uuid}"
+  email: "tu123_${uuid}@example.com"
+  password: "Passw0rd!@#"
+  expected_status: 201
+  db_check: true
+
+- title: "注册失败-用户名已存在"
+  action: register_duplicate_username
+  password: "Test@123456"
+  expected_status: 400
+
+- title: "注册失败-邮箱已存在"
+  action: register_duplicate_email
+  password: "Test@123456"
+  expected_status: 400
+
+- title: "注册失败-邮箱格式非法-无@"
+  action: register
+  username: "bad_email_1_${uuid}"
+  email: "not-an-email"
+  password: "Test@123456"
+  expected_status: 422
+
+- title: "注册失败-邮箱格式非法-无域名"
+  action: register
+  username: "bad_email_2_${uuid}"
+  email: "user@"
+  password: "Test@123456"
+  expected_status: 422
+
+- title: "注册失败-缺少username字段"
+  action: register
+  email: "missing_${uuid}@example.com"
+  password: "Test@123456"
+  expected_status: 422
+
+- title: "注册失败-缺少password字段"
+  action: register
+  username: "nopass_${uuid}"
+  email: "nopass_${uuid}@example.com"
+  expected_status: 422
+
+# ===== 登录 =====
+- title: "注册失败-所有字段为null"
+  action: register
+  username: null
+  email: null
+  password: null
+  expected_status: 422
+
+- title: "登录成功-返回JWT"
+  action: login
+  expected_status: 200
+  check_token: true
+
+- title: "登录失败-用户名为null返回422"
+  action: login
+  username_override: null
+  expected_status: 422
+
+- title: "登录失败-密码错误"
+  action: login
+  password_override: "WrongPassword@123"
+  expected_status: 401
+
+- title: "登录失败-用户不存在"
+  action: login
+  username_override: "nonexistent_user_xyz"
+  password_override: "Any@123456"
+  expected_status: 401
+
+- title: "登录失败-账号已禁用"
+  action: login_disabled
+  expected_status: 403

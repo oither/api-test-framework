@@ -1,0 +1,59 @@
+- title: "创建评论成功"
+  action: create
+  content: "这是一条自动化测试评论_${uuid}"
+  expected_status: 201
+  db_check: true
+
+- title: "创建评论失败-文章不存在"
+  action: create
+  article_id: 999999
+  content: "评论不存在的文章"
+  expected_status: 404
+
+- title: "创建评论失败-未登录"
+  action: create_no_auth
+  content: "未登录评论"
+  expected_status: 401
+
+- title: "创建评论失败-缺少content"
+  action: create
+  expected_status: 422
+
+- title: "评论列表-有评论的文章"
+  action: list_with_comments
+  expected_status: 200
+  expect_non_empty: true
+
+- title: "评论列表-无评论的文章"
+  action: list_empty
+  expected_status: 200
+  expect_empty: true
+
+- title: "评论列表-文章不存在返回空列表"
+  action: list
+  article_id: 999999
+  expected_status: 200
+  expect_empty: true
+
+- title: "删除评论-评论者本人返回204"
+  action: delete_by_owner
+  expected_status: 204
+  db_check_deleted: true
+
+- title: "删除评论-非评论者返回403"
+  action: delete_by_other
+  expected_status: 403
+
+- title: "删除评论-跨文章删除返回404"
+  action: delete_cross_article
+  expected_status: 404
+
+- title: "删除评论-评论不存在返回404"
+  action: delete
+  comment_id: 999999
+  expected_status: 404
+
+- title: "删除评论-未登录返回401"
+  action: delete_no_auth
+  comment_id: 999999
+  expected_status: 401
