@@ -77,7 +77,8 @@ def another_logged_in_apis():
 
     user_data = generate_random_user()
     auth = AuthAPI()
-    auth.register(**user_data)
+    reg_resp = auth.register(**user_data)
+    assert reg_resp.status_code == 201, f"第二用户注册失败: {reg_resp.text}"
     resp = auth.login(user_data["username"], user_data["password"])
     assert resp.status_code == 200, f"第二用户登录失败: {resp.text}"
     token = resp.json()["access_token"]

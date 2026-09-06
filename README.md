@@ -1,8 +1,10 @@
 # api-test-framework — 博客系统 API 自动化测试框架
 
-基于 **Python + pytest + requests** 的数据驱动 API 自动化测试框架，针对个人博客系统（FastAPI + SQLite）的全部 11 个接口编写了 **62 条测试用例**，采用 **API 层 / 用例层 / 数据层** 三层架构，支持多环境切换、接口 + 数据库双重断言、Allure 报告与失败自动重试。
+![API Tests](https://github.com/oither/api-test-framework/actions/workflows/api-tests.yml/badge.svg)
 
-> 被测系统：[blog-system-under-test](https://github.com/)（FastAPI + SQLite + JWT，含用户认证、文章 CRUD、评论与资源归属权限校验）
+基于 **Python + pytest + requests** 的数据驱动 API 自动化测试框架，针对个人博客系统（FastAPI + SQLite）的全部 11 个接口编写了 **64 条测试用例**，采用 **API 层 / 用例层 / 数据层** 三层架构，支持多环境切换、接口 + 数据库双重断言、Allure 报告与失败自动重试，并通过 GitHub Actions 在每次 push 时自动完成「拉起被测服务 → 跑全量用例 → 发布 Allure 报告」。
+
+> 被测系统：[blog-system-under-test](https://github.com/oither/blog-system-under-test.git)（FastAPI + SQLite + JWT，含用户认证、文章 CRUD、评论与资源归属权限校验）
 
 ## 技术栈
 
@@ -70,7 +72,7 @@ api-test-framework/
 ├── testcases/               # 用例层
 │   ├── conftest.py          # 全局 fixture：随机用户注册/登录/Token 注入/数据清理
 │   ├── test_smoke.py        # 冒烟：健康检查 + 注册→登录→发文→落库→清理
-│   ├── test_auth.py         # 认证模块 17 条
+│   ├── test_auth.py         # 认证模块 23 条（含 Form 登录、鉴权与校验顺序）
 │   ├── test_article.py      # 文章模块 27 条
 │   └── test_comment.py      # 评论模块 12 条
 ├── testdata/                # 数据层
@@ -84,6 +86,9 @@ api-test-framework/
 ├── reports/                 # allure-results / allure-report / logs（不入库）
 ├── conftest.py              # 根 conftest：--env 参数、marker 注册、失败日志
 ├── pytest.ini               # alluredir、reruns、marker 声明
+├── docs/
+│   └── interview-notes.md   # 面试问答要点（结合本项目实现）
+├── .github/workflows/       # CI：起被测服务 → 全量用例 → Allure 报告 artifact
 └── requirements.txt
 ```
 
@@ -121,6 +126,8 @@ pytest -m smoke
 # 失败用例自动重试已在 pytest.ini 中开启（--reruns=2）
 ```
 
+> 注意：需在项目根目录运行 pytest——`DB_PATH` 与日志输出均为相对路径，从其他目录运行会导致数据库校验与日志落错位置。
+
 ### 4. 查看 Allure 报告
 
 ```bash
@@ -134,22 +141,35 @@ allure serve reports/allure-results
 
 > Allure 命令行需要单独安装：`scoop install allure` / `npm install -g allure-commandline`，或从 [GitHub Releases](https://github.com/allure-framework/allure2/releases) 下载，要求 Java 8+。
 
+## 持续集成
+
+GitHub Actions 工作流（[.github/workflows/api-tests.yml](.github/workflows/api-tests.yml)）在每次 push 到 main 或手动触发时自动执行：
+
+1. 克隆被测博客系统，安装两侧依赖，生成随机 `SECRET_KEY` 配置
+2. 后台启动 uvicorn，轮询健康检查接口等待服务就绪
+3. `pytest --env=dev` 跑全量 64 条用例
+4. 无论成败，生成 Allure HTML 报告并上传为构建产物（Artifact）；用例失败时额外上传被测服务日志便于排查
+
+报告在 Actions 运行详情页底部 Artifacts 区下载后本地打开即可。
+
 ## 用例覆盖
 
-共 **62 条用例**，覆盖被测系统 11 个接口的正常、异常、边界、鉴权与权限场景：
+共 **64 条用例**，覆盖被测系统 11 个接口的正常、异常、边界、鉴权与权限场景：
 
 | 模块 | 接口 | 用例数 | 覆盖场景 |
 |------|------|-------|---------|
 | 冒烟 | `/` 注册→登录→发文链路 | 2 | 服务可用性、核心链路、落库校验 |
 | 认证 | `POST /auth/register` | 9 | 注册成功（DB 校验密码已哈希）、用户名/邮箱重复 400、非法邮箱/缺字段/全 null 422 |
 | 认证 | `POST /auth/login` | 5 | 登录成功（Token 可用）、密码错误 401、用户不存在 401、禁用账号 403、字段 null 422 |
-| 认证 | 受保护接口鉴权 | 3 | 5 类受保护接口无 Token 401、无效 Token 401、校验顺序 401 先于 404 |
+| 认证 | `POST /auth/login/form` | 2 | Form 表单登录成功（Token 可用）、密码错误 401 |
+| 认证 | 受保护接口鉴权 | 7 | 5 类受保护接口无 Token 401、无效 Token 401、校验顺序 401 先于 404 |
 | 文章 | `POST /articles` | 6 | 创建成功（DB 校验 author_id 归属）、缺 title/content 422、未登录 401、空标题/超长标题边界 |
 | 文章 | `GET /articles` | 6 | 默认分页、自定义分页、limit=0/101 422、limit=1 下界、skip 负数 422 |
 | 文章 | `GET /articles?search=` | 2 | 命中返回非空、未命中返回空 |
 | 文章 | `GET /articles/{id}` | 2 | 存在 200、不存在 404 |
 | 文章 | `PUT /articles/{id}` | 5 | 全量更新、部分更新（exclude_unset 未传字段不被改）、非作者 403、不存在 404、未登录 401 |
 | 文章 | `DELETE /articles/{id}` | 4 | 作者删除 204（DB 校验已删）、非作者 403、不存在 404、未登录 401 |
+| 文章 | 权限校验顺序 | 2 | 有 Token + 资源不存在 → 404、非作者修改 → 403 |
 | 评论 | `POST /articles/{id}/comments` | 4 | 创建成功（DB 校验 user_id/article_id）、文章不存在 404、未登录 401、缺 content 422 |
 | 评论 | `GET /articles/{id}/comments` | 3 | 有评论非空、无评论为空、文章不存在返回空列表（锚定实际行为） |
 | 评论 | `DELETE /articles/{id}/comments/{id}` | 5 | 评论者删除 204（DB 校验）、非评论者 403、跨文章删除 404、评论不存在 404、未登录 401 |
@@ -185,3 +205,11 @@ allure serve reports/allure-results
 - **为什么 sqlite3 而不是 SQLAlchemy？** 只做只读校验和清理 DELETE，单文件库、无连接池诉求，标准库零依赖反而更简单。
 - **为什么每个用例新建随机用户？** 被 CRUD 用例共享账号会造成数据耦合（A 用例删了 B 用例的文章），随机用户 + fixture 清理让每个用例自带独立数据集，天然支持重复执行。
 - **为什么 Token 放 fixture 注入而不是用例里手动 set？** 用例只描述业务场景，登录态是绝大多数用例的公共前置；权限类用例（401/403）再单独显式置空/替换 Token。
+
+## 已知局限与后续方向
+
+- 被测系统使用 SQLite 单文件库，并发与性能场景不在本项目范围内，由独立的 Locust 全链路压测项目覆盖。
+- 用例串行执行，session 级 API 实例的 Token 状态依赖该前提；如需并行（pytest-xdist）应改为函数级实例或按请求显式传 Token。
+- 异常场景依赖被测系统真实行为，未引入 Mock/Stub（如"禁用账号"靠直改数据库构造）。
+
+结合本项目实现的面试问答要点见 [docs/interview-notes.md](docs/interview-notes.md)。

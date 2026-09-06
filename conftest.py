@@ -26,13 +26,13 @@ def pytest_configure(config):
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """用例失败时附加信息到 Allure"""
+    """用例失败时附加信息到 Allure（含 setup/teardown 阶段的错误）"""
     outcome = yield
     report = outcome.get_result()
-    if report.when == "call" and report.failed:
-        logger.error(f"❌ 用例失败: {item.name}")
+    if report.failed:
+        logger.error(f"❌ 用例失败({report.when}): {item.name}")
         allure.attach(
-            f"失败用例: {item.name}\n详细日志见 reports/logs/",
+            f"失败用例: {item.name} (阶段: {report.when})\n详细日志见 reports/logs/",
             name="Failure Info",
             attachment_type=allure.attachment_type.TEXT,
         )

@@ -1,0 +1,74 @@
+name: API Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 测试框架
+        uses: actions/checkout@v4
+
+      # 被测系统与 DB_PATH=../blog-system-under-test/blog.db 的相对路径约定一致
+      # 若被测仓库为私有，需改用 PAT 拉取
+      - name: Checkout 被测博客系统
+        run: git clone https://github.com/oither/blog-system-under-test.git ../blog-system-under-test
+
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖（框架 + 被测系统）
+        run: |
+          pip install -r requirements.txt
+          pip install -r ../blog-system-under-test/requirements.txt
+
+      - name: 生成被测系统配置（随机 SECRET_KEY）
+        working-directory: ../blog-system-under-test
+        run: |
+          cp .env.example .env
+          sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')/" .env
+
+      - name: 启动被测服务并等待就绪
+        working-directory: ../blog-system-under-test
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/ > /dev/null && echo "服务已就绪" && exit 0
+            sleep 1
+          done
+          echo "服务启动超时"; cat uvicorn.log; exit 1
+
+      - name: 运行全量测试（64 条）
+        run: pytest --env=dev
+
+      # 以下步骤无论测试是否失败都执行，保证失败时也有报告可查
+      - name: 安装 Allure CLI
+        if: always()
+        run: |
+          curl -sL -o /tmp/allure.tgz https://repo1.maven.org/maven2/io/qameta/allure/allure-commandline/2.46.1/allure-commandline-2.46.1.tgz
+          tar -xzf /tmp/allure.tgz -C /tmp
+          echo "/tmp/allure-2.46.1/bin" >> $GITHUB_PATH
+
+      - name: 生成 Allure 报告
+        if: always()
+        run: allure generate reports/allure-results -o reports/allure-report --clean
+
+      - name: 上传 Allure 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: reports/allure-report
+
+      - name: 失败时上传被测服务日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uvicorn-log
+          path: ../blog-system-under-test/uvicorn.log

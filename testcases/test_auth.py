@@ -42,6 +42,11 @@ class TestAuth:
             password = case.get("password_override", registered_user["password"])
             resp = auth_api.login(username, password)
 
+        elif action == "login_form":
+            username = case.get("username_override", registered_user["username"])
+            password = case.get("password_override", registered_user["password"])
+            resp = auth_api.login_form(username, password)
+
         elif action == "login_disabled":
             resp = auth_api.login(disabled_user["username"], disabled_user["password"])
 
@@ -65,10 +70,14 @@ class TestAuth:
             data = resp.json()
             assert "access_token" in data, "响应缺少 access_token"
             assert data["token_type"] == "bearer"
-            # 验证 Token 真的能用
+            # 用"需要鉴权且无副作用"的请求验证 Token 真实有效：
+            # GET /articles 是公开接口不能用来验证；PUT 不存在文章，
+            # 有效 Token 通过鉴权层后返回 404，无效 Token 被拦截返回 401
             auth_api.set_token(data["access_token"])
-            verify = auth_api.get("/articles")
-            assert verify.status_code == 200, "Token 无法访问受保护接口"
+            verify = auth_api.request("PUT", "/articles/999999", json={"title": "x"})
+            assert verify.status_code == 404, (
+                f"Token 未通过鉴权校验: 期望 404(资源不存在), 实际 {verify.status_code}"
+            )
             auth_api.set_token(None)  # 还原，避免污染其他用例
 
     @allure.story("权限校验")
