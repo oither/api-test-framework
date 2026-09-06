@@ -10,28 +10,47 @@ class TestComment:
     @allure.story("评论CRUD")
     @allure.title("{case[title]}")
     @parametrize_from_yaml("comment_data.yaml")
-    def test_comment_scenarios(
-        self, comment_api, article_api, auth_api, db,
-        logged_in_user, user_article, another_logged_in_apis, case
-    ):
+    def test_comment_scenarios(self, comment_api, article_api, db, logged_in_user, request, case):
+        """
+        数据驱动的评论场景用例。
+        user_article / another_logged_in_apis 按 action 惰性加载：
+        404/401/空列表类用例不需要预置文章或第二用户。
+        """
         case = resolve_placeholders(case)
         action = case["action"]
         expected = case["expected_status"]
-        article_id = case.get("article_id", user_article["id"])
+        user_article = None
+        other_apis = None
+
+        def _user_article() -> dict:
+            nonlocal user_article
+            if user_article is None:
+                user_article = request.getfixturevalue("user_article")
+            return user_article
+
+        def _other_apis() -> dict:
+            nonlocal other_apis
+            if other_apis is None:
+                other_apis = request.getfixturevalue("another_logged_in_apis")
+            return other_apis
 
         comment_api.set_token(logged_in_user["token"])
 
         if action == "create":
+            article_id = (
+                case["article_id"] if "article_id" in case else _user_article()["id"]
+            )
             resp = comment_api.create(article_id, content=case.get("content"))
 
         elif action == "create_no_auth":
+            article_id = _user_article()["id"]
             comment_api.set_token(None)
-            resp = comment_api.create(user_article["id"], content=case["content"])
+            resp = comment_api.create(article_id, content=case["content"])
             comment_api.set_token(logged_in_user["token"])
 
         elif action == "list_with_comments":
             # 先创建一条评论
-            comment_api.create(user_article["id"], content="预置评论")
+            comment_api.create(_user_article()["id"], content="预置评论")
             resp = comment_api.list(user_article["id"])
 
         elif action == "list_empty":
@@ -41,13 +60,14 @@ class TestComment:
             article_api.delete_article(tmp.json()["id"])
 
         elif action == "list":
-            resp = comment_api.list(article_id)
+            resp = comment_api.list(case["article_id"])
 
         elif action == "delete_by_owner":
             # 先创建评论，再删除
-            c = comment_api.create(user_article["id"], content="待删除评论")
+            article_id = _user_article()["id"]
+            c = comment_api.create(article_id, content="待删除评论")
             cid = c.json()["id"]
-            resp = comment_api.delete_comment(user_article["id"], cid)
+            resp = comment_api.delete_comment(article_id, cid)
             if case.get("db_check_deleted"):
                 rows = db.query(
                     "SELECT * FROM comments WHERE id = ?", (cid,)
@@ -56,14 +76,16 @@ class TestComment:
 
         elif action == "delete_by_other":
             # 用户A创建评论，用户B尝试删除
-            c = comment_api.create(user_article["id"], content="A的评论")
+            article_id = _user_article()["id"]
+            c = comment_api.create(article_id, content="A的评论")
             cid = c.json()["id"]
-            other = another_logged_in_apis["comment"]
-            resp = other.delete_comment(user_article["id"], cid)
+            other = _other_apis()["comment"]
+            resp = other.delete_comment(article_id, cid)
 
         elif action == "delete_cross_article":
             # 在文章1创建评论，尝试通过文章2的路径删除 → 404
-            c = comment_api.create(user_article["id"], content="跨文章测试")
+            article_id = _user_article()["id"]
+            c = comment_api.create(article_id, content="跨文章测试")
             cid = c.json()["id"]
             tmp = article_api.create(title="另一篇文章", content="test")
             other_article_id = tmp.json()["id"]
@@ -71,11 +93,12 @@ class TestComment:
             article_api.delete_article(other_article_id)
 
         elif action == "delete":
-            resp = comment_api.delete_comment(article_id, case["comment_id"])
+            resp = comment_api.delete_comment(case["article_id"], case["comment_id"])
 
         elif action == "delete_no_auth":
+            article_id = _user_article()["id"]
             comment_api.set_token(None)
-            resp = comment_api.delete_comment(user_article["id"], case["comment_id"])
+            resp = comment_api.delete_comment(article_id, case["comment_id"])
             comment_api.set_token(logged_in_user["token"])
 
         else:

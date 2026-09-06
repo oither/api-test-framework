@@ -2,7 +2,9 @@
 
 ![API Tests](https://github.com/oither/api-test-framework/actions/workflows/api-tests.yml/badge.svg)
 
-基于 **Python + pytest + requests** 的数据驱动 API 自动化测试框架，针对个人博客系统（FastAPI + SQLite）的全部 11 个接口编写了 **64 条测试用例**，采用 **API 层 / 用例层 / 数据层** 三层架构，支持多环境切换、接口 + 数据库双重断言、Allure 报告与失败自动重试，并通过 GitHub Actions 在每次 push 时自动完成「拉起被测服务 → 跑全量用例 → 发布 Allure 报告」。
+**[📖 在线 Allure 报告（GitHub Pages）](https://oither.github.io/api-test-framework/)** — 每次 push 自动更新，含历史趋势图
+
+基于 **Python + pytest + requests** 的数据驱动 API 自动化测试框架，针对个人博客系统（FastAPI + SQLite）的全部 11 个接口编写了 **64 条测试用例**，采用 **API 层 / 用例层 / 数据层** 三层架构，支持多环境切换、接口 + 数据库双重断言、Allure 报告与失败自动重试，并通过 GitHub Actions 在每次 push 时自动完成「拉起被测服务 → 跑全量用例 → 发布 Allure 报告到 GitHub Pages」。
 
 > 被测系统：[blog-system-under-test](https://github.com/oither/blog-system-under-test.git)（FastAPI + SQLite + JWT，含用户认证、文章 CRUD、评论与资源归属权限校验）
 
@@ -11,7 +13,7 @@
 | 层面 | 技术 | 说明 |
 |------|------|------|
 | 语言 | Python 3.11+ | 实际运行于 3.13 |
-| 测试框架 | pytest 8.x | fixture 管理生命周期、parametrize 数据驱动 |
+| 测试框架 | pytest 9.x | fixture 管理生命周期、parametrize 数据驱动 |
 | HTTP 请求 | requests | `Session` 会话复用，统一封装 |
 | 数据驱动 | PyYAML | 测试数据与用例代码分离 |
 | 数据库校验 | sqlite3（标准库） | 直查被测系统 SQLite，做落库双重断言 |
@@ -126,7 +128,7 @@ pytest -m smoke
 # 失败用例自动重试已在 pytest.ini 中开启（--reruns=2）
 ```
 
-> 注意：需在项目根目录运行 pytest——`DB_PATH` 与日志输出均为相对路径，从其他目录运行会导致数据库校验与日志落错位置。
+> DB_PATH 与日志目录均锚定到项目根路径解析，从任意工作目录运行 pytest 都能落对位置，无需 cd 到根目录。
 
 ### 4. 查看 Allure 报告
 
@@ -145,12 +147,20 @@ allure serve reports/allure-results
 
 GitHub Actions 工作流（[.github/workflows/api-tests.yml](.github/workflows/api-tests.yml)）在每次 push 到 main 或手动触发时自动执行：
 
-1. 克隆被测博客系统，安装两侧依赖，生成随机 `SECRET_KEY` 配置
+1. 克隆被测博客系统，安装两侧依赖（显式约束 `pydantic<2.13`，规避其与被测系统 `fastapi==0.104.1` 的不兼容），生成随机 `SECRET_KEY` 配置
 2. 后台启动 uvicorn，轮询健康检查接口等待服务就绪
 3. `pytest --env=dev` 跑全量 64 条用例
-4. 无论成败，生成 Allure HTML 报告并上传为构建产物（Artifact）；用例失败时额外上传被测服务日志便于排查
+4. 无论成败，生成 Allure HTML 报告；用例失败时额外上传被测服务日志便于排查
+5. 将报告发布到 GitHub Pages（[在线地址](https://oither.github.io/api-test-framework/)），并通过 Actions Cache 跨构建保留 Allure 历史数据，报告自带通过率/耗时趋势图
 
-报告在 Actions 运行详情页底部 Artifacts 区下载后本地打开即可。
+## 工程化特性
+
+- **fixture 惰性加载**：数据驱动用例原先无论场景是否需要，都固定预置"注册+登录+发文+第二用户"（每条约 5 个前置请求）；改为用例内按 `action` 通过 `request.getfixturevalue()` 按需拉取后，纯 422/401/404 类用例零前置，全量套件耗时从 56s 降至 25s（-56%）
+- **启动健康检查 fail-fast**：`pytest_sessionstart` 中轮询被测服务，不可达时秒级终止会话并给出启动指引，而不是让 64 条用例以连接错误失败（重试后就是 192 条错误记录）
+- **日志脱敏**：`BaseAPI` 请求日志对 `password`/`token` 等敏感字段统一打码为 `***`，密码不落日志文件
+- **路径锚定项目根**：`DB_PATH`、日志目录均以项目根解析为绝对路径，任意工作目录运行都正确；超时也改为 `REQUEST_TIMEOUT` 环境变量驱动
+- **清理逻辑收拢**：`DBHelper.delete_user_data()`（按外键指向级联删评论→文章→用户）/ `delete_article_data()` 统一清理 SQL，三个用户 fixture 复用；`user_article` 清理改为 DB 级联，规避被测系统删文章不级联删评论留下的孤儿记录
+- **Allure 环境信息**：会话启动时写入 `environment.properties`（环境名、被测地址、Python 版本、主机），报告首页直接可读
 
 ## 用例覆盖
 
@@ -199,6 +209,12 @@ GitHub Actions 工作流（[.github/workflows/api-tests.yml](.github/workflows/a
 - **定位**：查被测系统源码确认 `GET /articles/{id}/comments` 实现就是按 `article_id` 过滤查询，不校验文章存在性（README 接口文档也只对 POST 承诺 404）。
 - **解决**：修正用例预期为 200 + 空列表。
 - **收获**：写异常用例前必须先用真实请求探一遍系统行为（或对照接口文档），不能想当然按 REST 语义脑补预期；测试锚定的应该是"约定行为"而不是"想象行为"。
+
+**4. 依赖漂移：pydantic 升级后被测服务直接起不来**
+
+- **现象**：本地新装环境后启动被测系统，uvicorn 在 import 阶段就崩溃：`AttributeError: 'FieldInfo' object has no attribute 'in_'`。
+- **定位**：被测系统钉死了 `fastapi==0.104.1` 却没钉 pydantic；pydantic 2.13 改了 `FieldInfo` 内部结构，与旧版 FastAPI 的参数解析不兼容。降级到 pydantic 2.11 后恢复正常。
+- **解决**：测试框架本地环境降级 pydantic；CI 工作流安装依赖后显式追加 `pip install "pydantic>=2.5,<2.13"` 兜底。这也是一次间接验证——**被测系统自己的 CI 同样会踩这个坑**，依赖只钉直接依赖、不钉传递依赖，迟早会在某个"与我无关"的升级日炸掉。
 
 ## 设计取舍
 

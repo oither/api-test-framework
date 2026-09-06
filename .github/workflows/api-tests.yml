@@ -5,6 +5,16 @@ on:
     branches: [main]
   workflow_dispatch: # 支持手动触发
 
+# deploy-report 需要 Pages 部署权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   api-tests:
     runs-on: ubuntu-latest
@@ -27,6 +37,9 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install -r ../blog-system-under-test/requirements.txt
+          # 被测系统钉了 fastapi==0.104.1 但未钉 pydantic，
+          # pydantic>=2.13 会让其在 import 阶段直接崩溃（FieldInfo.in_）
+          pip install "pydantic>=2.5,<2.13"
 
       - name: 生成被测系统配置（随机 SECRET_KEY）
         working-directory: ../blog-system-under-test
@@ -44,6 +57,15 @@ jobs:
           done
           echo "服务启动超时"; cat uvicorn.log; exit 1
 
+      # 恢复上次构建的 Allure 历史数据，报告中才有跨构建趋势图
+      - name: 恢复 Allure 历史
+        if: always()
+        uses: actions/cache/restore@v4
+        with:
+          path: reports/allure-results/history
+          key: allure-history-${{ github.run_id }}
+          restore-keys: allure-history-
+
       - name: 运行全量测试（64 条）
         run: pytest --env=dev
 
@@ -57,7 +79,21 @@ jobs:
 
       - name: 生成 Allure 报告
         if: always()
-        run: allure generate reports/allure-results -o reports/allure-report --clean
+        run: |
+          allure generate reports/allure-results -o reports/allure-report --clean
+          # 把本次报告的历史写回缓存路径，供下一次构建恢复趋势
+          mkdir -p reports/allure-results/history
+          if [ -d reports/allure-report/history ]; then
+            cp -r reports/allure-report/history/* reports/allure-results/history/
+          fi
+
+      # cache/save 显式落盘（actions/cache 默认只在 job 成功时保存，用例失败也会丢趋势）
+      - name: 保存 Allure 历史
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: reports/allure-results/history
+          key: allure-history-${{ github.run_id }}
 
       - name: 上传 Allure 报告
         if: always()
@@ -72,3 +108,31 @@ jobs:
         with:
           name: uvicorn-log
           path: ../blog-system-under-test/uvicorn.log
+
+  # 把 Allure 报告发布到 GitHub Pages，push 即更新，无需下载 Artifact
+  deploy-report:
+    needs: api-tests
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: https://oither.github.io/api-test-framework/
+    steps:
+      - name: 下载 Allure 报告
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-report
+          path: reports/allure-report
+
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: 发布报告
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: reports/allure-report
+
+      - name: Deploy GitHub Pages
+        uses: actions/deploy-pages@v4

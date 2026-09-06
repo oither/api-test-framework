@@ -50,6 +50,7 @@
 
 - title: "删除评论-评论不存在返回404"
   action: delete
+  article_id: 999999
   comment_id: 999999
   expected_status: 404
 

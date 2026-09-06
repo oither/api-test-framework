@@ -2,6 +2,22 @@ import requests
 from utils.logger import logger
 from config.settings import get_settings
 
+# 日志脱敏：这些字段的值不落日志，避免密码/Token 泄露到日志文件
+SENSITIVE_KEYS = {"password", "token", "access_token", "authorization"}
+
+
+def _mask_sensitive(payload):
+    """递归脱敏请求体中的敏感字段"""
+    if isinstance(payload, dict):
+        return {
+            k: ("***" if str(k).lower() in SENSITIVE_KEYS else _mask_sensitive(v))
+            for k, v in payload.items()
+        }
+    if isinstance(payload, list):
+        return [_mask_sensitive(item) for item in payload]
+    return payload
+
+
 class BaseAPI:
     def __init__(self):
         self.settings = get_settings()
@@ -18,12 +34,15 @@ class BaseAPI:
         headers = kwargs.pop("headers", {})
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        
-        # 日志记录请求
-        logger.info(f"→ {method} {url} | params={kwargs.get('params')} | body={kwargs.get('json')}")
-        
+
+        body = kwargs.get("json") or kwargs.get("data")
+        logger.info(f"→ {method} {url} | params={kwargs.get('params')} | body={_mask_sensitive(body)}")
+
         try:
-            resp = self.session.request(method, url, headers=headers, timeout=10, **kwargs)
+            resp = self.session.request(
+                method, url, headers=headers,
+                timeout=self.settings.request_timeout, **kwargs
+            )
             logger.info(f"← {resp.status_code} | {resp.elapsed.total_seconds():.3f}s | {resp.text[:200]}")
             return resp
         except requests.exceptions.RequestException as e:

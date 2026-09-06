@@ -2,6 +2,18 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# 项目根目录：config/ 的上一级。所有相对路径都锚定到这里，
+# 保证从任意工作目录运行 pytest，DB 与日志都落在项目内
+PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def _resolve_path(path: str) -> str:
+    """相对路径 → 以项目根为基准的绝对路径；绝对路径原样返回"""
+    p = Path(path)
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    return str(p.resolve())
+
 
 class Settings:
     def __init__(self, env: str = "dev"):
@@ -12,8 +24,8 @@ class Settings:
         load_dotenv(env_file, override=True)
 
         self.base_url = os.getenv("BASE_URL", "http://127.0.0.1:8000")
-        self.db_path = os.getenv("DB_PATH", "../blog-system-under-test/blog.db")
-        self.token_expire_minutes = int(os.getenv("TOKEN_EXPIRE_MINUTES", 30))
+        self.db_path = _resolve_path(os.getenv("DB_PATH", "../blog-system-under-test/blog.db"))
+        self.request_timeout = float(os.getenv("REQUEST_TIMEOUT", 10))
 
 
 _settings_instance = None

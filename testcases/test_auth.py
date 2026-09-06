@@ -11,10 +11,22 @@ class TestAuth:
     @allure.story("用户注册与登录")
     @allure.title("{case[title]}")
     @parametrize_from_yaml("auth_data.yaml")
-    def test_auth_scenarios(self, auth_api, db, registered_user, disabled_user, case):
+    def test_auth_scenarios(self, auth_api, db, request, case):
+        """
+        数据驱动的认证场景用例。
+        registered_user / disabled_user 按 action 惰性加载：
+        纯注册类用例不需要预置用户，省掉每次用例的注册开销。
+        """
         case = resolve_placeholders(case)
         action = case["action"]
         expected = case["expected_status"]
+        registered_user = None
+
+        def _registered_user() -> dict:
+            nonlocal registered_user
+            if registered_user is None:
+                registered_user = request.getfixturevalue("registered_user")
+            return registered_user
 
         if action == "register":
             resp = auth_api.register(
@@ -29,25 +41,28 @@ class TestAuth:
             auth_api.register(f"dup_{uid}", f"dup_{uid}@example.com", "Test@123456")
             resp = auth_api.register(f"dup_{uid}", f"other_{uid}@example.com", "Test@123456")
             # 清理第一个用户
-            db.query("DELETE FROM users WHERE username = ?", (f"dup_{uid}",))
+            db.delete_user_data(f"dup_{uid}")
 
         elif action == "register_duplicate_email":
             uid = uuid.uuid4().hex[:6]
             auth_api.register(f"dup_e_{uid}", f"dup_email_{uid}@example.com", "Test@123456")
             resp = auth_api.register(f"other_{uid}", f"dup_email_{uid}@example.com", "Test@123456")
-            db.query("DELETE FROM users WHERE username = ?", (f"dup_e_{uid}",))
+            db.delete_user_data(f"dup_e_{uid}")
 
         elif action == "login":
-            username = case.get("username_override", registered_user["username"])
-            password = case.get("password_override", registered_user["password"])
+            user = _registered_user()
+            username = case.get("username_override", user["username"])
+            password = case.get("password_override", user["password"])
             resp = auth_api.login(username, password)
 
         elif action == "login_form":
-            username = case.get("username_override", registered_user["username"])
-            password = case.get("password_override", registered_user["password"])
+            user = _registered_user()
+            username = case.get("username_override", user["username"])
+            password = case.get("password_override", user["password"])
             resp = auth_api.login_form(username, password)
 
         elif action == "login_disabled":
+            disabled_user = request.getfixturevalue("disabled_user")
             resp = auth_api.login(disabled_user["username"], disabled_user["password"])
 
         else:
@@ -104,8 +119,7 @@ class TestAuth:
     @allure.title("携带无效Token → 401")
     def test_invalid_token(self, auth_api):
         auth_api.set_token("invalid.token.string")
-        resp = auth_api.get("/articles")
-        # 列表接口不需要鉴权，换一个需要鉴权的
+        # POST /articles 需要鉴权；GET /articles 是公开接口，不能用来验证 Token
         resp = auth_api.request("POST", "/articles", json={"title": "t", "content": "c"})
         assert resp.status_code == 401
         auth_api.set_token(None)

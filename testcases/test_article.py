@@ -10,13 +10,29 @@ class TestArticle:
     @allure.story("文章CRUD")
     @allure.title("{case[title]}")
     @parametrize_from_yaml("article_data.yaml")
-    def test_article_scenarios(
-        self, article_api, auth_api, db,
-        logged_in_user, user_article, another_logged_in_apis, case
-    ):
+    def test_article_scenarios(self, article_api, db, logged_in_user, request, case):
+        """
+        数据驱动的文章场景用例。
+        user_article / another_logged_in_apis 按 action 惰性加载：
+        列表、搜索、404 类用例不需要预置文章或第二用户，省掉每次用例的前置请求。
+        """
         case = resolve_placeholders(case)
         action = case["action"]
         expected = case["expected_status"]
+        user_article = None
+        other_apis = None
+
+        def _user_article() -> dict:
+            nonlocal user_article
+            if user_article is None:
+                user_article = request.getfixturevalue("user_article")
+            return user_article
+
+        def _other_apis() -> dict:
+            nonlocal other_apis
+            if other_apis is None:
+                other_apis = request.getfixturevalue("another_logged_in_apis")
+            return other_apis
 
         # 确保当前是登录用户的 Token
         article_api.set_token(logged_in_user["token"])
@@ -42,27 +58,30 @@ class TestArticle:
             )
 
         elif action == "list_search":
+            if case.get("expect_non_empty"):
+                # 搜索命中用例：预置一篇标题含"测试文章"的文章，保证断言确定性
+                _user_article()
             resp = article_api.list(search=case["search_keyword"])
 
         elif action == "detail_exist":
-            resp = article_api.detail(user_article["id"])
+            resp = article_api.detail(_user_article()["id"])
 
         elif action == "detail":
             resp = article_api.detail(case["article_id"])
 
         elif action == "update_full":
             resp = article_api.update(
-                user_article["id"],
+                _user_article()["id"],
                 title=case["new_title"],
                 content=case["new_content"],
             )
 
         elif action == "update_partial":
-            resp = article_api.update(user_article["id"], title=case["new_title"])
+            resp = article_api.update(_user_article()["id"], title=case["new_title"])
 
         elif action == "update_by_other":
-            other_api = another_logged_in_apis["article"]
-            resp = other_api.update(user_article["id"], title=case["new_title"])
+            other = _other_apis()["article"]
+            resp = other.update(_user_article()["id"], title=case["new_title"])
 
         elif action == "update":
             resp = article_api.update(case["article_id"], title=case["new_title"])
@@ -81,8 +100,8 @@ class TestArticle:
                 assert db.get_article(tmp_id) is None, "删除后DB仍有记录"
 
         elif action == "delete_by_other":
-            other_api = another_logged_in_apis["article"]
-            resp = other_api.delete_article(user_article["id"])
+            other = _other_apis()["article"]
+            resp = other.delete_article(_user_article()["id"])
 
         elif action == "delete":
             resp = article_api.delete_article(case["article_id"])
